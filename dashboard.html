@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      padding: 20px;
+    }
+    .dashboard {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    h1 {
+      color: #333;
+    }
+    form {
+      margin-bottom: 20px;
+    }
+    .folder {
+      font-weight: bold;
+      cursor: pointer;
+      color: blue;
+    }
+    .file {
+      margin-left: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <h1>Welcome to the Dashboard</h1>
+    
+    <h2>File Upload</h2>
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+      <input type="file" name="file" required>
+      <input type="text" name="folder" placeholder="Folder (optional)">
+      <button type="submit">Upload</button>
+    </form>
+    
+    <h2>Folder Operations</h2>
+    <form action="/create-folder" method="POST">
+      <input type="text" name="folderName" placeholder="Folder name" required>
+      <input type="hidden" name="parentFolder" id="parent-folder">
+      <button type="submit">Create Folder</button>
+    </form>
+    
+    <form action="/delete-folder" method="POST">
+      <input type="text" name="folderName" placeholder="Folder name" required>
+      <button type="submit">Delete Folder</button>
+    </form>
+
+    <h2>File List</h2>
+    <ul id="file-list">
+      <!-- Files and folders will be dynamically inserted here -->
+    </ul>
+  </div>
+
+  <script>
+    let currentFolder = 'root'; // Default starting folder
+
+    async function loadFilesAndFolders(folder) {
+      try {
+        const response = await fetch(`/files-and-folders?folder=${encodeURIComponent(folder)}`);
+        const data = await response.json();
+        
+        const fileList = document.getElementById('file-list');
+        fileList.innerHTML = ''; // Clear existing items
+        
+        // Set parent folder in hidden input
+        document.getElementById('parent-folder').value = folder;
+        
+        // Add folders
+        data.folders.forEach(folder => {
+          const li = document.createElement('li');
+          li.className = 'folder';
+          li.textContent = folder.name;
+          li.onclick = () => {
+            currentFolder = folder.name;
+            loadFilesAndFolders(folder.name); // Load contents of the clicked folder
+          };
+          fileList.appendChild(li);
+        });
+
+        // Add files
+        data.files.forEach(file => {
+          const li = document.createElement('li');
+          li.className = 'file';
+          li.innerHTML = `<a href="/download/${file.filename}">${file.filename}</a>`;
+          fileList.appendChild(li);
+        });
+
+      } catch (error) {
+        console.error('Error loading files and folders:', error);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadFilesAndFolders(currentFolder); // Load initial contents
+    });
+  </script>
+</body>
+</html>
