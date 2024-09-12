@@ -14,7 +14,7 @@ const options = {
 };
 
 const app = express();
-const PORT = 3000;
+const PORT = 80;
 
 // Connect to MongoDB
 mongoose.connect('mongodb+srv://ronivrolijks:oparoniv@cluster0.4pcpt9x.mongodb.net/webserver', { useNewUrlParser: true, useUnifiedTopology: true })
