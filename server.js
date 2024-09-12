@@ -1,17 +1,11 @@
 const express = require('express');
-const https = require('https');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const bodyParser = require('body-parser');
 const multer = require('multer');
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
-
-// SSL certificates
-const options = {
-  key: fs.readFileSync('key.pem'),
-  cert: fs.readFileSync('cert.pem')
-};
 
 const app = express();
 const PORT = 80;
@@ -74,7 +68,7 @@ function authMiddleware(req, res, next) {
 
 // Serve the dashboard (Password-protected route)
 app.get('/dashboard', authMiddleware, (req, res) => {
-  res.sendFile(path.join(__dirname, 'dashboard.html'));
+  res.sendFile(path.join(__dirname, 'front/dashboard.html'));
 });
 
 // File upload route
@@ -152,7 +146,6 @@ app.get('/files-and-folders', authMiddleware, async (req, res) => {
   });
 });
 
-// HTTPS server with SSL encryption
-https.createServer(options, app).listen(PORT, () => {
-  console.log(`HTTPS Server running on port ${PORT}`);
+http.createServer(app).listen(PORT, () => {
+  console.log(`HTTP Server running on port ${PORT}`);
 });
