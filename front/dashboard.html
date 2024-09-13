@@ -32,6 +32,41 @@
     .file {
       margin-left: 20px;
     }
+    /* Modal styles */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      background-color: rgb(0,0,0);
+      background-color: rgba(0,0,0,0.4);
+      padding-top: 60px;
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: 5% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 80%;
+      max-width: 300px;
+      border-radius: 8px;
+    }
+    .close {
+      color: #aaa;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+    }
+    .close:hover,
+    .close:focus {
+      color: black;
+      text-decoration: none;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -63,8 +98,19 @@
     </ul>
   </div>
 
+  <!-- Modal for password input -->
+  <div id="passwordModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2>Enter Decryption Password</h2>
+      <input type="password" id="passwordInput" placeholder="Password">
+      <button id="submitPassword">Submit</button>
+    </div>
+  </div>
+
   <script>
     let currentFolder = 'root'; // Default starting folder
+    let fileToDownload = '';
 
     async function loadFilesAndFolders(folder) {
       try {
@@ -93,7 +139,7 @@
         data.files.forEach(file => {
           const li = document.createElement('li');
           li.className = 'file';
-          li.innerHTML = `<a href="/download/${file.filename}">${file.filename}</a>`;
+          li.innerHTML = `<a href="#" onclick="showPasswordModal('${file.filename}')">${file.filename}</a>`;
           fileList.appendChild(li);
         });
 
@@ -102,9 +148,37 @@
       }
     }
 
+    function showPasswordModal(filename) {
+      fileToDownload = filename;
+      document.getElementById('passwordModal').style.display = 'block';
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       loadFilesAndFolders(currentFolder); // Load initial contents
     });
+
+    // Modal close button functionality
+    const modal = document.getElementById('passwordModal');
+    const closeBtn = document.getElementsByClassName('close')[0];
+    closeBtn.onclick = () => {
+      modal.style.display = 'none';
+    };
+    window.onclick = (event) => {
+      if (event.target === modal) {
+        modal.style.display = 'none';
+      }
+    };
+
+    // Handle password submission
+    document.getElementById('submitPassword').onclick = () => {
+      const password = document.getElementById('passwordInput').value;
+      if (password) {
+        window.location.href = `/download/${fileToDownload}?password=${encodeURIComponent(password)}`;
+        modal.style.display = 'none';
+      } else {
+        alert('Please enter the password.');
+      }
+    };
   </script>
 </body>
 </html>

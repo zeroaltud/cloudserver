@@ -5,10 +5,14 @@ const path = require('path');
 const bodyParser = require('body-parser');
 const multer = require('multer');
 const mongoose = require('mongoose');
+const crypto = require('crypto'); // Encryption library
 const { Schema } = mongoose;
 
 const app = express();
 const PORT = 80;
+const SECRET_KEY = crypto.createHash('sha256').update('decrypt1234').digest('base64').substring(0, 32);
+const IV_LENGTH = 16; // For AES, IV length is always 16 bytes
+const ENCRYPTION_ALGORITHM = 'aes-256-ctr';
 
 // Connect to MongoDB
 mongoose.connect('mongodb+srv://ronivrolijks:oparoniv@cluster0.4pcpt9x.mongodb.net/webserver', { useNewUrlParser: true, useUnifiedTopology: true })
@@ -30,6 +34,19 @@ const folderSchema = new Schema({
   createdAt: { type: Date, default: Date.now }
 });
 const Folder = mongoose.model('Folder', folderSchema);
+
+const passwordSchema = new Schema({
+  password: String
+});
+const Password = mongoose.model('Password', passwordSchema);
+
+// Save the password to the database (Run this once when the server starts, or in a seeder)
+Password.findOne().then(doc => {
+  if (!doc) {
+    const newPassword = new Password({ password: 'ilikedecrypt' });
+    newPassword.save();
+  }
+});
 
 // Set up multer for file uploads
 const storage = multer.diskStorage({
@@ -66,46 +83,123 @@ function authMiddleware(req, res, next) {
   }
 }
 
+function encryptFile(data) {
+  const iv = crypto.randomBytes(IV_LENGTH); // Generate a random 16-byte IV
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, Buffer.from(SECRET_KEY, 'utf8'), iv);
+  
+  const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  
+  // Return both the IV and the encrypted data
+  return { iv, encrypted };
+}
+
+function decryptFile(iv, data) {
+  // Ensure the IV is 16 bytes
+  if (iv.length !== IV_LENGTH) {
+    throw new Error('Invalid IV length');
+  }
+
+  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, Buffer.from(SECRET_KEY, 'utf8'), iv);
+  
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+  return decrypted;
+}
+
 // Serve the dashboard (Password-protected route)
 app.get('/dashboard', authMiddleware, (req, res) => {
   res.sendFile(path.join(__dirname, 'front/dashboard.html'));
 });
 
-// File upload route
 app.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
   const { folder } = req.body;
-  const uploadedFile = new File({
-    filename: req.file.filename,
-    folder: folder || 'root'
+  const filePath = path.join('uploads', req.file.filename);
+
+  fs.readFile(req.file.path, (err, data) => {
+    if (err) throw err;
+
+    // Encrypt the file
+    const { iv, encrypted } = encryptFile(data);
+
+    // Combine IV and encrypted data into one buffer and save
+    const finalBuffer = Buffer.concat([iv, encrypted]);
+    fs.writeFile(filePath, finalBuffer, (err) => {
+      if (err) throw err;
+
+      // Save metadata
+      const uploadedFile = new File({
+        filename: req.file.filename,
+        folder: folder || 'root'
+      });
+
+      uploadedFile.save()
+        .then(() => res.redirect('/dashboard'))
+        .catch(err => res.status(500).send('Error saving file metadata'));
+    });
   });
-  
-  await uploadedFile.save();
-  res.redirect('/dashboard');
 });
 
-// Download file route
-app.get('/download/:filename', authMiddleware, (req, res) => {
+// Middleware to check decryption password
+app.get('/download/:filename', async (req, res) => {
   const filePath = path.join(__dirname, 'uploads', req.params.filename);
-  if (fs.existsSync(filePath)) {
-    res.download(filePath);
-  } else {
-    res.status(404).send('File not found');
+  
+  // Ensure file exists
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('File not found');
   }
+  
+  // Get the decryption password from the database
+  const passwordDoc = await Password.findOne();
+  if (!passwordDoc) {
+    return res.status(500).send('Decryption password not set in database.');
+  }
+
+  const storedPassword = passwordDoc.password;
+  const userPassword = req.query.password; // Password from query parameter
+
+  // Check if the provided password matches
+  if (userPassword !== storedPassword) {
+    return res.status(403).send('Incorrect password for decryption.');
+  }
+
+  // Read file data
+  fs.readFile(filePath, (err, fileData) => {
+    if (err) return res.status(500).send('Error reading file');
+
+    // Extract IV and encrypted data
+    const iv = fileData.slice(0, IV_LENGTH);
+    const encryptedData = fileData.slice(IV_LENGTH);
+
+    try {
+      // Decrypt the data
+      const decryptedData = decryptFile(iv, encryptedData);
+
+      // Send the decrypted file to the client
+      res.setHeader('Content-Disposition', `attachment; filename=${req.params.filename}`);
+      res.send(decryptedData);
+    } catch (error) {
+      res.status(500).send('Error decrypting file');
+    }
+  });
 });
 
-// Delete file route
-app.post('/delete', authMiddleware, async (req, res) => {
+app.post('/delete-file', authMiddleware, async (req, res) => {
   const { filename } = req.body;
   const filePath = path.join(__dirname, 'uploads', filename);
-  
+
+  // Check if file exists
   if (fs.existsSync(filePath)) {
+    // Delete the file from the filesystem
     fs.unlinkSync(filePath);
+    
+    // Remove file metadata from MongoDB
     await File.deleteOne({ filename });
-    res.redirect('/dashboard');
+    
+    res.send('File deleted successfully.');
   } else {
-    res.status(404).send('File not found');
+    res.status(404).send('File not found.');
   }
 });
+
 
 // Create a folder
 app.post('/create-folder', authMiddleware, async (req, res) => {
@@ -114,7 +208,7 @@ app.post('/create-folder', authMiddleware, async (req, res) => {
     name: folderName,
     parent: parentFolder || 'root'
   });
-  
+
   await folder.save();
   res.redirect('/dashboard');
 });
@@ -122,7 +216,7 @@ app.post('/create-folder', authMiddleware, async (req, res) => {
 // Delete a folder
 app.post('/delete-folder', authMiddleware, async (req, res) => {
   const { folderName } = req.body;
-  
+
   const folderToDelete = await Folder.findOne({ name: folderName }).exec();
   if (folderToDelete) {
     await Folder.deleteOne({ name: folderName });
