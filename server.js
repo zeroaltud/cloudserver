@@ -5,21 +5,19 @@ const path = require('path');
 const bodyParser = require('body-parser');
 const multer = require('multer');
 const mongoose = require('mongoose');
-const crypto = require('crypto'); // Encryption library
+const crypto = require('crypto');
 const { Schema } = mongoose;
 
 const app = express();
 const PORT = 80;
 const SECRET_KEY = crypto.createHash('sha256').update('decrypt1234').digest('base64').substring(0, 32);
-const IV_LENGTH = 16; // For AES, IV length is always 16 bytes
+const IV_LENGTH = 16;
 const ENCRYPTION_ALGORITHM = 'aes-256-ctr';
 
-// Connect to MongoDB
 mongoose.connect('mongodb+srv://ronivrolijks:oparoniv@cluster0.4pcpt9x.mongodb.net/webserver', { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.log('MongoDB connection error:', err));
 
-// Define a schema to store file metadata
 const fileSchema = new Schema({
   filename: String,
   folder: String,
@@ -27,7 +25,8 @@ const fileSchema = new Schema({
 });
 const File = mongoose.model('File', fileSchema);
 
-// Define a schema to store folder metadata
+
+
 const folderSchema = new Schema({
   name: String,
   parent: String,
@@ -40,7 +39,6 @@ const passwordSchema = new Schema({
 });
 const Password = mongoose.model('Password', passwordSchema);
 
-// Save the password to the database (Run this once when the server starts, or in a seeder)
 Password.findOne().then(doc => {
   if (!doc) {
     const newPassword = new Password({ password: 'ilikedecrypt' });
@@ -48,10 +46,9 @@ Password.findOne().then(doc => {
   }
 });
 
-// Set up multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads'); // Save files directly to the `uploads` directory
+    cb(null, 'uploads'); 
   },
   filename: (req, file, cb) => {
     cb(null, file.originalname);
@@ -59,12 +56,10 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// Middleware for parsing form data
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json()); // To handle JSON requests
+app.use(bodyParser.json());
 
-// Simple password authentication
-const PASSWORD = 'your_secure_password'; // Set a strong password here
+const PASSWORD = 'your_secure_password'; // need to change
 
 function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
@@ -84,17 +79,14 @@ function authMiddleware(req, res, next) {
 }
 
 function encryptFile(data) {
-  const iv = crypto.randomBytes(IV_LENGTH); // Generate a random 16-byte IV
+  const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, Buffer.from(SECRET_KEY, 'utf8'), iv);
   
   const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-  
-  // Return both the IV and the encrypted data
   return { iv, encrypted };
 }
 
 function decryptFile(iv, data) {
-  // Ensure the IV is 16 bytes
   if (iv.length !== IV_LENGTH) {
     throw new Error('Invalid IV length');
   }
@@ -104,8 +96,6 @@ function decryptFile(iv, data) {
   const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
   return decrypted;
 }
-
-// Serve the dashboard (Password-protected route)
 app.get('/dashboard', authMiddleware, (req, res) => {
   res.sendFile(path.join(__dirname, 'front/dashboard.html'));
 });
@@ -116,16 +106,11 @@ app.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
 
   fs.readFile(req.file.path, (err, data) => {
     if (err) throw err;
-
-    // Encrypt the file
     const { iv, encrypted } = encryptFile(data);
 
-    // Combine IV and encrypted data into one buffer and save
     const finalBuffer = Buffer.concat([iv, encrypted]);
     fs.writeFile(filePath, finalBuffer, (err) => {
       if (err) throw err;
-
-      // Save metadata
       const uploadedFile = new File({
         filename: req.file.filename,
         folder: folder || 'root'
@@ -137,43 +122,29 @@ app.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
     });
   });
 });
-
-// Middleware to check decryption password
 app.get('/download/:filename', async (req, res) => {
   const filePath = path.join(__dirname, 'uploads', req.params.filename);
-  
-  // Ensure file exists
   if (!fs.existsSync(filePath)) {
     return res.status(404).send('File not found');
   }
-  
-  // Get the decryption password from the database
   const passwordDoc = await Password.findOne();
   if (!passwordDoc) {
     return res.status(500).send('Decryption password not set in database.');
   }
 
   const storedPassword = passwordDoc.password;
-  const userPassword = req.query.password; // Password from query parameter
+  const userPassword = req.query.password;
 
-  // Check if the provided password matches
   if (userPassword !== storedPassword) {
     return res.status(403).send('Incorrect password for decryption.');
   }
-
-  // Read file data
   fs.readFile(filePath, (err, fileData) => {
     if (err) return res.status(500).send('Error reading file');
-
-    // Extract IV and encrypted data
     const iv = fileData.slice(0, IV_LENGTH);
     const encryptedData = fileData.slice(IV_LENGTH);
 
     try {
-      // Decrypt the data
       const decryptedData = decryptFile(iv, encryptedData);
-
-      // Send the decrypted file to the client
       res.setHeader('Content-Disposition', `attachment; filename=${req.params.filename}`);
       res.send(decryptedData);
     } catch (error) {
@@ -185,13 +156,8 @@ app.get('/download/:filename', async (req, res) => {
 app.post('/delete-file', authMiddleware, async (req, res) => {
   const { filename } = req.body;
   const filePath = path.join(__dirname, 'uploads', filename);
-
-  // Check if file exists
   if (fs.existsSync(filePath)) {
-    // Delete the file from the filesystem
     fs.unlinkSync(filePath);
-    
-    // Remove file metadata from MongoDB
     await File.deleteOne({ filename });
     
     res.send('File deleted successfully.');
@@ -199,9 +165,6 @@ app.post('/delete-file', authMiddleware, async (req, res) => {
     res.status(404).send('File not found.');
   }
 });
-
-
-// Create a folder
 app.post('/create-folder', authMiddleware, async (req, res) => {
   const { folderName, parentFolder } = req.body;
   const folder = new Folder({
@@ -213,7 +176,6 @@ app.post('/create-folder', authMiddleware, async (req, res) => {
   res.redirect('/dashboard');
 });
 
-// Delete a folder
 app.post('/delete-folder', authMiddleware, async (req, res) => {
   const { folderName } = req.body;
 
@@ -227,7 +189,6 @@ app.post('/delete-folder', authMiddleware, async (req, res) => {
   }
 });
 
-// Get files and folders in a directory
 app.get('/files-and-folders', authMiddleware, async (req, res) => {
   const folder = req.query.folder || 'root';
 
